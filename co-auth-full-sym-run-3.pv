@@ -1,0 +1,159 @@
+(* Co-authentication full symmetric protocol Run #3
+
+A               R               C
+| <-------------|               |
+| --------------+-------------->|
+|               |<--------------|
+| <-------------|               |
+| ------------->|               |
+| <-------------|               |
+        
+
+SETUP:
+
+-- Symmetric key cryptography is used.
+-- Attackers have Requester's keys Kar
+-- Active attackers
+
+VERIFICATION RESULT SUMMARY:
+
+-- Attackers cannot get the secret session key and transmitted acknowledgment message
+-- Authentication of A to R holds 
+-- Authentication of R to A holds 
+
+*)
+
+(* Use an active attacker *)
+set attacker = active.
+
+(* Public communication channels *)
+free c : channel.
+free cAR : channel.
+free cAC : channel.
+
+(* Private communication channel between Requester and Collaborator *)
+free cRC : channel [private].
+
+(* Type declarations *)
+type key.
+type nonce.
+type host.
+type tag.
+
+(* Ids of Authenticator, Requester, and Collaborator *)
+free A, R, C: host.
+
+(* Tables for registered devices and their associated keys *)
+table keys(host, key).
+table registeredDevices(host, host).
+
+(* A secret acknowledgment and session key *)
+free session_key_test: bitstring [private].
+
+(* constants for labeling messages*)
+const access_req: tag [data].
+const collab_req: tag [data].
+const collab_res: tag [data].
+const acknowledgment: bitstring [data].
+
+(* Secrecy queries*)
+query attacker (session_key_test).
+
+(* Authentication queries *)
+
+(* Requester believes that it initiated an authentication protocol with Authenticator. *)
+event beginA (host, host, host, nonce).
+(* Authenticator belives that it finished an authentication process with Requester and established a session key. *)
+event endA (host, host, host, nonce, nonce).
+
+
+(* Authenticator believes that Requester requested an access request. *)
+event beginR (host, host, host, nonce).
+(* Requester belives that it finished the authentication protocol with Authenticator. *)
+event endR (host, host, host, nonce).
+
+(* Collaborator beleives that it received a collaboration request from an associated device and responding this collaboration request. *)
+event collabA (host, host, host).
+event collabR (host, host, host).
+
+(* Authentication of R to A *)
+query h1: host, h2:host, h3: host, n: nonce, n2: nonce; event (endA(h1, h2, h3, n, n2)) ==> (inj-event (collabA(h1, h2, h3)) && inj-event (beginA(h1, h2, h3, n))).
+
+(* Authentication of A to R *)
+query h1: host, h2:host, h3: host, n: nonce; event (endR(h1, h2, h3, n)) ==> (inj-event (collabR(h1, h2, h3)) && inj-event (beginR(h1, h2, h3, n))).
+
+(* Symmetric key encryption and decryption functions *)
+fun encrypt(bitstring,key): bitstring.
+reduc forall x: bitstring, y: key; decrypt(encrypt(x,y),y) = x.
+    
+
+(* Authenticator process *)
+let Authenticator =
+    in (cAR , (xR: host, m: bitstring)); (* 1- R --> A *)
+    get keys(=xR, k_ar: key) in (* Get the key of the device *)
+        let (=access_req, n1: nonce) = decrypt (m, k_ar) in (* Decrypt message *)
+            get registeredDevices (=xR, xC: host) in (* Check if xR is registered with xC *)
+                event beginR(A, xR, xC, n1);
+                get keys(=xC, k_ac: key) in (* Get the key of the device *)
+                    new n2: nonce;
+                    new k_ar1: key; (* Generate new keys *)
+                    new k_ar2: key;  out(c , k_ar2); (* Let attacker know k_ar2*)
+                    let cipher = encrypt((collab_req, xC, n2, k_ar1, k_ar2), k_ar) in
+                        out (cAC, (A, encrypt((xR, cipher), k_ac))); (* 2- A --> C *)
+                        in (cAR, (=xR, m2: bitstring)); (* Wait for the response from Collaborator *) (* 3- C --> A *)
+                        let (=collab_res, =xC, =n2) = decrypt (m2, k_ar1) in (* Check the collaboration request. *)
+                            new session_key: key;   (* Generate a session key *)
+                            out (cAR, (A, encrypt((xC, session_key, session_key_test, n1), k_ar1))); (* 4- A --> R *)
+                            in (cAR, m3: bitstring);
+                            let (=acknowledgment) = decrypt(m3, session_key) in (* Check the acknowledgment after establishing a session key. *)
+                                event endA(A, xR, xC, n1, n2);
+                                phase 1; insert keys(xR, k_ar2); out(c , k_ar2). (* Update xR's key at the end of the session and test the forward secrecy. *)                   
+
+
+(* Requester process *)
+let Requester =
+    in(c, (xR: host)); (* Let the environment device which device the Requester going to be. It can be R or C. *)
+    get registeredDevices(=xR, xC: host) in (* Get the associated device *)
+        get keys(=xR, k_ar: key) in  (* Get the key *)
+            new n1: nonce; (* Create a new timestamp, i.e., nonce *) 
+            event beginA(A, xR, xC, n1);
+            out (cAR, (xR, encrypt((access_req, n1), k_ar))); (* 1-  R --> A *)
+            in (cRC, (=A, cipher: bitstring));
+            let (=collab_req, =xC, n2:bitstring, k_ar1: key, k_ar2: key) = decrypt(cipher, k_ar) in
+                out (cAR, (R, encrypt((collab_res, xC, n2), k_ar1)));
+                in (cAR , (=A, m: bitstring)); (* 4- A --> R *)
+                let (=xC, session_key: key, =session_key_test, =n1) = decrypt (m, k_ar1) in    
+                    out (cAR, encrypt(acknowledgment, session_key)); (* 5- R --> A *)
+                    event endR(A, xR, xC, n1).
+
+(* Collaborator process *)
+let Collaborator =
+    in(c, xC: host);  (* Let the environment device which device the Collaborator going to be. It can be R or C. *)
+    in (cAC , (=A, m: bitstring)); (* 2- A --> C *)
+    get registeredDevices (=xC, xR: host) in (* Get the associated device *)
+        get keys (=xC, k_ac: key) in (* Get the key *)
+            let (=xR, cipher: bitstring) = decrypt (m, k_ac) in
+                event collabR (A, xR, xC);
+                event collabA (A, xR, xC);
+                out (cRC, (A, cipher)). (* 3- C --> A *)
+
+
+(* Main process *)
+process
+    (* Create secret keys *)
+    new k_ar: key;
+    new k_ac: key;
+
+    (* Keys table *)
+    insert keys(R, k_ar); 
+    insert keys(C, k_ac);
+
+    (* Assocaiated devices table *)
+    insert registeredDevices(R, C);
+    insert registeredDevices(C, R);
+
+    (* Give Requestor's key to attackers*)
+    out (c, k_ar); 
+
+    (* Init processes *)
+    ((!Authenticator) | (!Requester) | (!Collaborator) | phase 1; out(c , k_ar))
