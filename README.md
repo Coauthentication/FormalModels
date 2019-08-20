@@ -13,6 +13,7 @@ Protocols shown in Coauthentication:
 - Figure 7: co-auth-all-public-full-asym-run-1--3
 - Figure 8: m-out-of-n/co-auth-full-3-out-of-n-sym-run-1--3
 - 3-out-of-n: m-out-of-n/co-auth-full-3-out-of-n-sym-run-1--3
+- 4-out-of-n: m-out-of-n/co-auth-full-4-out-of-n-sym-run-1--3
 - Figure 1 (stateful): stateful/co-auth-full-sym-run-1--3
 - Figure 2 (stateful): stateful/co-auth-full-without-challenge-sym-run-1--3
 - Figure 3 (stateful): stateful/co-auth-full-without-challenge-forwarding-sym-run-1--3
